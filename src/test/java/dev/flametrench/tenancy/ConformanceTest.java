@@ -63,7 +63,8 @@ class ConformanceTest {
             Map.entry("AlreadyTerminalError", AlreadyTerminalError.class),
             Map.entry("NotFoundError", NotFoundError.class),
             Map.entry("IdentifierBindingRequiredError", IdentifierBindingRequiredError.class),
-            Map.entry("IdentifierMismatchError", IdentifierMismatchError.class)
+            Map.entry("IdentifierMismatchError", IdentifierMismatchError.class),
+            Map.entry("OrgSlugConflictError", OrgSlugConflictError.class)
     );
 
     private static JsonNode loadFixture(String relativePath) throws IOException {
@@ -208,7 +209,28 @@ class ConformanceTest {
             InMemoryTenancyStore store, String op, Map<String, Object> args
     ) {
         return switch (op) {
-            case "create_org" -> store.createOrg((String) args.get("creator"));
+            case "create_org" -> store.createOrg(
+                    (String) args.get("creator"),
+                    args.containsKey("name") ? (String) args.get("name") : null,
+                    args.containsKey("slug") ? (String) args.get("slug") : null
+            );
+
+            case "update_org" -> store.updateOrg(
+                    (String) args.get("org_id"),
+                    args.containsKey("name") ? (String) args.get("name") : InMemoryTenancyStore.UNSET,
+                    args.containsKey("slug") ? (String) args.get("slug") : InMemoryTenancyStore.UNSET
+            );
+
+            case "assert_org_fields" -> {
+                Organization org = store.getOrg((String) args.get("org_id"));
+                if (args.containsKey("expected_name")) {
+                    assertEquals(args.get("expected_name"), org.name());
+                }
+                if (args.containsKey("expected_slug")) {
+                    assertEquals(args.get("expected_slug"), org.slug());
+                }
+                yield null;
+            }
             case "add_member" -> store.addMember(
                     (String) args.get("org_id"),
                     (String) args.get("usr_id"),
@@ -372,5 +394,10 @@ class ConformanceTest {
     @TestFactory
     List<DynamicTest> acceptInvitationBinding() throws IOException {
         return conformanceTests("tenancy/invitation-accept-binding.json");
+    }
+
+    @TestFactory
+    List<DynamicTest> orgNameSlug() throws IOException {
+        return conformanceTests("tenancy/org-name-slug.json");
     }
 }

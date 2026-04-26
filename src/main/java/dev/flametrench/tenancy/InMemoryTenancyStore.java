@@ -93,9 +93,28 @@ public class InMemoryTenancyStore {
 
     // ─── Organizations ───
 
+    /**
+     * Sentinel for {@link #updateOrg} partial-update semantics. Pass
+     * this constant to skip a field (its value is preserved); pass
+     * {@code null} to clear the field.
+     */
+    public static final String UNSET = "__flametrench_unset__";
+
+    /** v0.1-compatible 1-arg createOrg. Defaults name and slug to null. */
     public CreateOrgResult createOrg(String creator) {
+        return createOrg(creator, null, null);
+    }
+
+    /** v0.2 (ADR 0011) createOrg accepting optional name and slug. */
+    public CreateOrgResult createOrg(String creator, String name, String slug) {
+        if (slug != null) {
+            validateSlug(slug);
+            enforceSlugUnique(slug, null);
+        }
         Instant now = now();
-        Organization org = new Organization(Id.generate("org"), Status.ACTIVE, now, now);
+        Organization org = new Organization(
+                Id.generate("org"), Status.ACTIVE, now, now, name, slug
+        );
         Membership ownerMembership = new Membership(
                 Id.generate("mem"), creator, org.id(), Role.OWNER, Status.ACTIVE,
                 null, null, null, now, now
@@ -108,6 +127,53 @@ public class InMemoryTenancyStore {
 
     public Organization getOrg(String orgId) {
         return requireOrg(orgId);
+    }
+
+    /**
+     * ADR 0011 partial update.
+     *
+     * <p>Pass {@link #UNSET} to skip a field; pass {@code null} to
+     * clear it. Slug uniqueness violations raise
+     * {@link OrgSlugConflictError}; updating a revoked org raises
+     * {@link AlreadyTerminalError}.
+     */
+    public Organization updateOrg(String orgId, String name, String slug) {
+        Organization org = requireOrg(orgId);
+        if (org.status() == Status.REVOKED) {
+            throw new AlreadyTerminalError("Org " + orgId + " is revoked; cannot update");
+        }
+        String newName = UNSET.equals(name) ? org.name() : name;
+        String newSlug = UNSET.equals(slug) ? org.slug() : slug;
+        if (!UNSET.equals(slug) && newSlug != null) {
+            validateSlug(newSlug);
+            enforceSlugUnique(newSlug, orgId);
+        }
+        Organization updated = org.withMetadata(newName, newSlug, now());
+        orgs.put(orgId, updated);
+        return updated;
+    }
+
+    private void enforceSlugUnique(String slug, String excludeOrgId) {
+        for (Organization existing : orgs.values()) {
+            if (existing.id().equals(excludeOrgId)) continue;
+            if (slug.equals(existing.slug()) && existing.status() != Status.REVOKED) {
+                throw new OrgSlugConflictError(slug);
+            }
+        }
+    }
+
+    private static final java.util.regex.Pattern SLUG_PATTERN =
+            java.util.regex.Pattern.compile("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$");
+
+    private static void validateSlug(String slug) {
+        if (!SLUG_PATTERN.matcher(slug).matches()) {
+            throw new PreconditionError(
+                    "Slug '" + slug + "' does not match the spec pattern "
+                            + "(DNS-label-style: 1-63 lowercase ASCII chars or digits or hyphens, "
+                            + "no leading/trailing hyphen)",
+                    "org_slug_format"
+            );
+        }
     }
 
     private Organization transitionOrg(String orgId, Status to) {
