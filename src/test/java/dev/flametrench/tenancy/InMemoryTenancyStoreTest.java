@@ -226,4 +226,39 @@ class InMemoryTenancyStoreTest {
         assertThrows(AlreadyTerminalError.class,
                 () -> store.revokeOrg(result.org().id()));
     }
+
+    @Test
+    void acceptInvitationRequiresAcceptingIdentifierWhenAsUsrIdProvided() {
+        // ADR 0009: existing-user accept without acceptingIdentifier fails closed.
+        CreateOrgResult result = store.createOrg(alice);
+        Invitation inv = store.createInvitation(
+                result.org().id(), "bob@example.com", Role.MEMBER, alice, future()
+        );
+        assertThrows(IdentifierBindingRequiredError.class,
+                () -> store.acceptInvitation(inv.id(), bob));
+    }
+
+    @Test
+    void acceptInvitationRejectsMismatchedAcceptingIdentifier() {
+        // ADR 0009: this is the privilege-escalation primitive closer.
+        CreateOrgResult result = store.createOrg(alice);
+        Invitation inv = store.createInvitation(
+                result.org().id(), "victim@example.org", Role.OWNER, alice, future()
+        );
+        IdentifierMismatchError err = assertThrows(IdentifierMismatchError.class,
+                () -> store.acceptInvitation(inv.id(), bob, "attacker@example.com"));
+        assertEquals("attacker@example.com", err.getAcceptingIdentifier());
+        assertEquals("victim@example.org", err.getInvitationIdentifier());
+    }
+
+    @Test
+    void acceptInvitationWithMatchingAcceptingIdentifierSucceeds() {
+        CreateOrgResult result = store.createOrg(alice);
+        Invitation inv = store.createInvitation(
+                result.org().id(), "bob@example.com", Role.MEMBER, alice, future()
+        );
+        AcceptInvitationResult out = store.acceptInvitation(inv.id(), bob, "bob@example.com");
+        assertEquals(bob, out.membership().usrId());
+        assertEquals(InvitationStatus.ACCEPTED, out.invitation().status());
+    }
 }

@@ -428,7 +428,11 @@ public class InMemoryTenancyStore {
         return inv;
     }
 
-    public AcceptInvitationResult acceptInvitation(String invId, String asUsrId) {
+    public AcceptInvitationResult acceptInvitation(
+            String invId,
+            String asUsrId,
+            String acceptingIdentifier
+    ) {
         Invitation inv = getInvitation(invId);
         if (inv.status() != InvitationStatus.PENDING) {
             throw new InvitationNotPendingError(
@@ -440,6 +444,15 @@ public class InMemoryTenancyStore {
             throw new InvitationExpiredError(
                     "Invitation " + invId + " expired at " + inv.expiresAt()
             );
+        }
+        // ADR 0009: existing-user accept MUST supply a matching identifier.
+        if (asUsrId != null) {
+            if (acceptingIdentifier == null) {
+                throw new IdentifierBindingRequiredError();
+            }
+            if (!acceptingIdentifier.equals(inv.identifier())) {
+                throw new IdentifierMismatchError(acceptingIdentifier, inv.identifier());
+            }
         }
         String usrId = asUsrId != null ? asUsrId : Id.generate("usr");
         if (findActiveMembership(usrId, inv.orgId()) != null) {
@@ -470,7 +483,17 @@ public class InMemoryTenancyStore {
     }
 
     public AcceptInvitationResult acceptInvitation(String invId) {
-        return acceptInvitation(invId, null);
+        return acceptInvitation(invId, null, null);
+    }
+
+    /**
+     * Backwards-compatible 2-arg overload retained for the mint-new-user
+     * flow only. Callers passing a non-null {@code asUsrId} via this
+     * overload will hit {@link IdentifierBindingRequiredError} per
+     * ADR 0009 — use the 3-arg form with the matching identifier.
+     */
+    public AcceptInvitationResult acceptInvitation(String invId, String asUsrId) {
+        return acceptInvitation(invId, asUsrId, null);
     }
 
     public Invitation declineInvitation(String invId, String asUsrId) {

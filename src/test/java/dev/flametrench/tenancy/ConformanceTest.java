@@ -52,16 +52,18 @@ class ConformanceTest {
 
     private static final Pattern VAR_PATTERN = Pattern.compile("^\\{([a-z_][a-z0-9_]*)\\}$");
 
-    private static final Map<String, Class<? extends RuntimeException>> ERROR_CLASSES = Map.of(
-            "SoleOwnerError", SoleOwnerError.class,
-            "RoleHierarchyError", RoleHierarchyError.class,
-            "ForbiddenError", ForbiddenError.class,
-            "DuplicateMembershipError", DuplicateMembershipError.class,
-            "InvitationNotPendingError", InvitationNotPendingError.class,
-            "InvitationExpiredError", InvitationExpiredError.class,
-            "PreconditionError", PreconditionError.class,
-            "AlreadyTerminalError", AlreadyTerminalError.class,
-            "NotFoundError", NotFoundError.class
+    private static final Map<String, Class<? extends RuntimeException>> ERROR_CLASSES = Map.ofEntries(
+            Map.entry("SoleOwnerError", SoleOwnerError.class),
+            Map.entry("RoleHierarchyError", RoleHierarchyError.class),
+            Map.entry("ForbiddenError", ForbiddenError.class),
+            Map.entry("DuplicateMembershipError", DuplicateMembershipError.class),
+            Map.entry("InvitationNotPendingError", InvitationNotPendingError.class),
+            Map.entry("InvitationExpiredError", InvitationExpiredError.class),
+            Map.entry("PreconditionError", PreconditionError.class),
+            Map.entry("AlreadyTerminalError", AlreadyTerminalError.class),
+            Map.entry("NotFoundError", NotFoundError.class),
+            Map.entry("IdentifierBindingRequiredError", IdentifierBindingRequiredError.class),
+            Map.entry("IdentifierMismatchError", IdentifierMismatchError.class)
     );
 
     private static JsonNode loadFixture(String relativePath) throws IOException {
@@ -247,7 +249,8 @@ class ConformanceTest {
             }
             case "accept_invitation" -> store.acceptInvitation(
                     (String) args.get("inv_id"),
-                    (String) args.get("as_usr_id")
+                    (String) args.get("as_usr_id"),
+                    (String) args.get("accepting_identifier")
             );
             case "decline_invitation" -> store.declineInvitation(
                     (String) args.get("inv_id"),
@@ -278,6 +281,11 @@ class ConformanceTest {
             }
             case "assert_equal" -> {
                 assertEquals(args.get("expected"), args.get("actual"));
+                yield null;
+            }
+            case "assert_invitation_status" -> {
+                Invitation inv = store.getInvitation((String) args.get("inv_id"));
+                assertEquals(args.get("expected_status"), inv.status().getValue());
                 yield null;
             }
             default -> throw new IllegalStateException("Unknown fixture op: " + op);
@@ -359,5 +367,10 @@ class ConformanceTest {
     @TestFactory
     List<DynamicTest> acceptInvitation() throws IOException {
         return conformanceTests("tenancy/invitation-accept.json");
+    }
+
+    @TestFactory
+    List<DynamicTest> acceptInvitationBinding() throws IOException {
+        return conformanceTests("tenancy/invitation-accept-binding.json");
     }
 }
