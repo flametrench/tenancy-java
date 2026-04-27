@@ -76,6 +76,30 @@ public class PostgresTenancyStore {
         return UUID.fromString(Id.decode(wireId).uuid());
     }
 
+    private static final java.util.regex.Pattern OBJECT_ID_WIRE =
+            java.util.regex.Pattern.compile("^[a-z]{2,6}_[0-9a-f]{32}$");
+
+    /**
+     * Decode an {@code object_id} to a Postgres-bindable UUID. See
+     * authz {@code PostgresTupleStore#objectIdToUuid} for rationale
+     * (spec#8) — wire-format prefixed IDs with non-registered prefixes
+     * (e.g. {@code proj_<hex>}) are decoded via {@link Id#decodeAny}.
+     */
+    private static UUID objectIdToUuid(String objectId) {
+        if (OBJECT_ID_WIRE.matcher(objectId).matches()) {
+            return UUID.fromString(Id.decodeAny(objectId).uuid());
+        }
+        if (objectId.length() == 32) {
+            String s = objectId;
+            return UUID.fromString(
+                    s.substring(0, 8) + "-" + s.substring(8, 12)
+                  + "-" + s.substring(12, 16) + "-" + s.substring(16, 20)
+                  + "-" + s.substring(20)
+            );
+        }
+        return UUID.fromString(objectId);
+    }
+
     /** Map a Postgres {@code role} value back to the {@link Role} enum. */
     private static Role _RoleFromString(String value) {
         for (Role r : Role.values()) {
@@ -1067,7 +1091,7 @@ public class PostgresTenancyStore {
                     ps.setObject(2, usrUuid);
                     ps.setString(3, pt.relation());
                     ps.setString(4, pt.objectType());
-                    ps.setObject(5, UUID.fromString(pt.objectId()));
+                    ps.setObject(5, objectIdToUuid(pt.objectId()));
                     ps.setTimestamp(6, ts);
                     ps.executeUpdate();
                 }
@@ -1191,7 +1215,7 @@ public class PostgresTenancyStore {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql.toString())) {
             ps.setString(1, objectType);
-            ps.setObject(2, UUID.fromString(objectId));
+            ps.setObject(2, objectIdToUuid(objectId));
             if (relation != null) ps.setString(3, relation);
             try (ResultSet rs = ps.executeQuery()) {
                 List<Tuple> rows = new ArrayList<>();
