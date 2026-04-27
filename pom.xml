@@ -7,7 +7,7 @@
 
     <groupId>dev.flametrench</groupId>
     <artifactId>tenancy</artifactId>
-    <version>0.2.0-rc.3</version>
+    <version>0.2.0-rc.4</version>
     <packaging>jar</packaging>
 
     <name>flametrench-tenancy</name>
@@ -48,6 +48,23 @@
             <version>0.1.0</version>
         </dependency>
 
+        <!-- Used by both the in-memory store (test scope below) and
+             PostgresTenancyStore at runtime for inv.pre_tuples JSONB. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.18.2</version>
+        </dependency>
+
+        <!-- Optional: only needed by PostgresTenancyStore. Adopters
+             wire their own DataSource. -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.4</version>
+            <optional>true</optional>
+        </dependency>
+
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
@@ -55,9 +72,9 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-            <version>2.18.2</version>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.4</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
