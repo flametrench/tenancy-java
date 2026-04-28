@@ -1,5 +1,7 @@
 # flametrench-tenancy (Java)
 
+[![CI](https://github.com/flametrench/tenancy-java/actions/workflows/ci.yml/badge.svg)](https://github.com/flametrench/tenancy-java/actions/workflows/ci.yml)
+
 Java SDK for the [Flametrench](https://github.com/flametrench/spec) tenancy specification: organizations, memberships (with the `mem_`/`tup_` duality), and atomic invitation acceptance.
 
 **Status:** v0.2.0-rc.5 (release candidate). Includes the production-ready `PostgresTenancyStore` alongside the in-memory reference store.
