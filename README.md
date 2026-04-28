@@ -1,6 +1,8 @@
 # flametrench-tenancy (Java)
 
-Java SDK for the [Flametrench v0.1](https://github.com/flametrench/spec) tenancy specification: organizations, memberships (with the `mem_`/`tup_` duality), and atomic invitation acceptance.
+Java SDK for the [Flametrench](https://github.com/flametrench/spec) tenancy specification: organizations, memberships (with the `mem_`/`tup_` duality), and atomic invitation acceptance.
+
+**Status:** v0.2.0-rc.5 (release candidate). Includes the production-ready `PostgresTenancyStore` alongside the in-memory reference store.
 
 The same behavioral guarantees that gate `@flametrench/tenancy` (Node), `flametrench/tenancy` (PHP), and `flametrench-tenancy` (Python) hold here:
 
@@ -45,7 +47,7 @@ Maven:
 <dependency>
     <groupId>dev.flametrench</groupId>
     <artifactId>tenancy</artifactId>
-    <version>0.1.0</version>
+    <version>0.2.0-rc.5</version>
 </dependency>
 ```
 
