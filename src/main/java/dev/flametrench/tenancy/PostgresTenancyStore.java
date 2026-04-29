@@ -8,10 +8,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.flametrench.ids.Id;
 
 import javax.sql.DataSource;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
+import java.security.SecureRandom;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Savepoint;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
@@ -56,7 +60,10 @@ public class PostgresTenancyStore {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
     private final DataSource dataSource;
+    private final Connection callerConnection;
     private final Clock clock;
 
     public PostgresTenancyStore(DataSource dataSource) {
@@ -65,7 +72,59 @@ public class PostgresTenancyStore {
 
     public PostgresTenancyStore(DataSource dataSource, Clock clock) {
         this.dataSource = dataSource;
+        this.callerConnection = null;
         this.clock = clock;
+    }
+
+    /**
+     * ADR 0013 caller-owned-connection constructor. The adopter manages
+     * the Connection's lifecycle and outer transaction; this store
+     * cooperates by using {@code SAVEPOINT}/{@code RELEASE} for its
+     * internal atomicity boundaries instead of opening its own
+     * transaction.
+     */
+    public PostgresTenancyStore(Connection callerConnection) {
+        this(callerConnection, Clock.systemUTC());
+    }
+
+    public PostgresTenancyStore(Connection callerConnection, Clock clock) {
+        this.dataSource = null;
+        this.callerConnection = callerConnection;
+        this.clock = clock;
+    }
+
+    private boolean isCallerOwned() {
+        return callerConnection != null;
+    }
+
+    private Connection acquireConnection() throws SQLException {
+        if (callerConnection == null) return dataSource.getConnection();
+        return (Connection) Proxy.newProxyInstance(
+            Connection.class.getClassLoader(),
+            new Class<?>[] { Connection.class },
+            (proxy, method, args) -> {
+                if ("close".equals(method.getName()) && method.getParameterCount() == 0) {
+                    return null;
+                }
+                try {
+                    return method.invoke(callerConnection, args);
+                } catch (InvocationTargetException e) {
+                    throw e.getCause();
+                }
+            }
+        );
+    }
+
+    private static String makeSavepointName() {
+        StackTraceElement[] stack = Thread.currentThread().getStackTrace();
+        String method = stack.length > 3 ? stack[3].getMethodName() : "tx";
+        String safe = method.replaceAll("[^A-Za-z0-9_]", "");
+        if (safe.isEmpty()) safe = "tx";
+        byte[] r = new byte[4];
+        SECURE_RANDOM.nextBytes(r);
+        StringBuilder hex = new StringBuilder(8);
+        for (byte b : r) hex.append(String.format("%02x", b & 0xff));
+        return "ft_" + safe + "_" + hex;
     }
 
     private Instant now() {
@@ -133,7 +192,28 @@ public class PostgresTenancyStore {
     }
 
     private <T> T tx(TxFn<T> fn) {
-        try (Connection conn = dataSource.getConnection()) {
+        if (isCallerOwned()) {
+            Connection conn = callerConnection;
+            try {
+                Savepoint sp = conn.setSavepoint(makeSavepointName());
+                try {
+                    T result = fn.apply(conn);
+                    conn.releaseSavepoint(sp);
+                    return result;
+                } catch (SQLException | RuntimeException e) {
+                    try {
+                        conn.rollback(sp);
+                        conn.releaseSavepoint(sp);
+                    } catch (SQLException ignored) {
+                    }
+                    if (e instanceof SQLException) throw new RuntimeException(e);
+                    throw (RuntimeException) e;
+                }
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        try (Connection conn = acquireConnection()) {
             boolean prevAuto = conn.getAutoCommit();
             conn.setAutoCommit(false);
             try {
@@ -342,7 +422,7 @@ public class PostgresTenancyStore {
     }
 
     public Organization getOrg(String orgId) {
-        try (Connection conn = dataSource.getConnection();
+        try (Connection conn = acquireConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT " + ORG_COLS + " FROM org WHERE id = ?")) {
             ps.setObject(1, wireToUuid(orgId));
@@ -551,7 +631,7 @@ public class PostgresTenancyStore {
     }
 
     public Membership getMembership(String memId) {
-        try (Connection conn = dataSource.getConnection();
+        try (Connection conn = acquireConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT " + MEM_COLS + " FROM mem WHERE id = ?")) {
             ps.setObject(1, wireToUuid(memId));
@@ -571,7 +651,7 @@ public class PostgresTenancyStore {
         if (status != null) sql.append(" AND status = ?");
         if (cursor != null) sql.append(" AND id > ?");
         sql.append(" ORDER BY id LIMIT ?");
-        try (Connection conn = dataSource.getConnection();
+        try (Connection conn = acquireConnection();
              PreparedStatement ps = conn.prepareStatement(sql.toString())) {
             int idx = 1;
             ps.setObject(idx++, wireToUuid(orgId));
@@ -971,7 +1051,7 @@ public class PostgresTenancyStore {
         }
         UUID invUuid = UUID.fromString(Id.decode(Id.generate("inv")).uuid());
         String preJson = preTuplesToJson(preTuples != null ? preTuples : List.of());
-        try (Connection conn = dataSource.getConnection();
+        try (Connection conn = acquireConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO inv (id, org_id, identifier, role, status, pre_tuples, invited_by, created_at, expires_at)"
                    + " VALUES (?, ?, ?, ?, 'pending', ?::jsonb, ?, ?, ?) RETURNING " + INV_COLS)) {
@@ -999,7 +1079,7 @@ public class PostgresTenancyStore {
     }
 
     public Invitation getInvitation(String invId) {
-        try (Connection conn = dataSource.getConnection();
+        try (Connection conn = acquireConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT " + INV_COLS + " FROM inv WHERE id = ?")) {
             ps.setObject(1, wireToUuid(invId));
@@ -1192,7 +1272,7 @@ public class PostgresTenancyStore {
     // ─── Tuple accessors ───
 
     public List<Tuple> listTuplesForSubject(String subjectType, String subjectId) {
-        try (Connection conn = dataSource.getConnection();
+        try (Connection conn = acquireConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT " + TUP_COLS + " FROM tup WHERE subject_type = ? AND subject_id = ?")) {
             ps.setString(1, subjectType);
@@ -1212,7 +1292,7 @@ public class PostgresTenancyStore {
                 "SELECT " + TUP_COLS + " FROM tup WHERE object_type = ? AND object_id = ?"
         );
         if (relation != null) sql.append(" AND relation = ?");
-        try (Connection conn = dataSource.getConnection();
+        try (Connection conn = acquireConnection();
              PreparedStatement ps = conn.prepareStatement(sql.toString())) {
             ps.setString(1, objectType);
             ps.setObject(2, objectIdToUuid(objectId));

@@ -342,4 +342,46 @@ class PostgresTenancyStoreTest {
         assertThrows(NotFoundError.class, () -> store.getMembership(Id.generate("mem")));
         assertThrows(NotFoundError.class, () -> store.getInvitation(Id.generate("inv")));
     }
+
+    // ─── Outer-transaction nesting (ADR 0013) ───
+
+    @Test
+    void createOrg_cooperatesWithOuterTransaction() throws java.sql.SQLException {
+        try (java.sql.Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            PostgresTenancyStore nested = new PostgresTenancyStore(conn);
+            CreateOrgResult r = nested.createOrg(alice, "Outer", "outer");
+            conn.commit();
+            assertEquals("Outer", store.getOrg(r.org().id()).name());
+        }
+    }
+
+    @Test
+    void outerRollback_undoesInnerCreateOrg() throws java.sql.SQLException {
+        String orgId;
+        try (java.sql.Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            PostgresTenancyStore nested = new PostgresTenancyStore(conn);
+            CreateOrgResult r = nested.createOrg(alice, null, "will-rollback");
+            orgId = r.org().id();
+            conn.rollback();
+        }
+        assertThrows(NotFoundError.class, () -> store.getOrg(orgId));
+    }
+
+    @Test
+    void multipleCallsInOuterCommitOrRollbackTogether() throws java.sql.SQLException {
+        String aId, bId;
+        try (java.sql.Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            PostgresTenancyStore nested = new PostgresTenancyStore(conn);
+            CreateOrgResult a = nested.createOrg(alice, null, "group-a");
+            CreateOrgResult b = nested.createOrg(bob, null, "group-b");
+            aId = a.org().id();
+            bId = b.org().id();
+            conn.rollback();
+        }
+        assertThrows(NotFoundError.class, () -> store.getOrg(aId));
+        assertThrows(NotFoundError.class, () -> store.getOrg(bId));
+    }
 }
