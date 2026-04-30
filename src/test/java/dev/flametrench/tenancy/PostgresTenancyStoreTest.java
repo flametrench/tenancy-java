@@ -384,4 +384,73 @@ class PostgresTenancyStoreTest {
         assertThrows(NotFoundError.class, () -> store.getOrg(aId));
         assertThrows(NotFoundError.class, () -> store.getOrg(bId));
     }
+
+    // createInvitation is a single-statement write shielded by nested() — these
+    // assert the savepoint pass-through actually cooperates with an outer txn.
+
+    @Test
+    void createInvitation_cooperatesWithOuterTransaction() throws java.sql.SQLException {
+        CreateOrgResult result = store.createOrg(alice);
+        String orgId = result.org().id();
+        String invId;
+        try (java.sql.Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            PostgresTenancyStore nested = new PostgresTenancyStore(conn);
+            Invitation inv = nested.createInvitation(
+                    orgId, "outer@example.com", Role.MEMBER, alice,
+                    Instant.now().plus(1, ChronoUnit.HOURS)
+            );
+            invId = inv.id();
+            conn.commit();
+        }
+        assertEquals("outer@example.com", store.getInvitation(invId).identifier());
+    }
+
+    @Test
+    void outerRollback_undoesInnerCreateInvitation() throws java.sql.SQLException {
+        CreateOrgResult result = store.createOrg(alice);
+        String orgId = result.org().id();
+        String invId;
+        try (java.sql.Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            PostgresTenancyStore nested = new PostgresTenancyStore(conn);
+            Invitation inv = nested.createInvitation(
+                    orgId, "rolled-back@example.com", Role.MEMBER, alice,
+                    Instant.now().plus(1, ChronoUnit.HOURS)
+            );
+            invId = inv.id();
+            conn.rollback();
+        }
+        assertThrows(NotFoundError.class, () -> store.getInvitation(invId));
+    }
+
+    @Test
+    void createInvitation_savepointRollsBackOnFailure_outerStillUsable() throws java.sql.SQLException {
+        CreateOrgResult result = store.createOrg(alice);
+        String orgId = result.org().id();
+        // A wire-format usr id that doesn't exist — FK on inv.invited_by fires
+        // inside the INSERT and would poison the outer txn without nested().
+        String ghostUsr = Id.generate("usr");
+
+        String survivorId;
+        try (java.sql.Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            PostgresTenancyStore nested = new PostgresTenancyStore(conn);
+
+            assertThrows(RuntimeException.class, () ->
+                    nested.createInvitation(
+                            orgId, "ghost@example.com", Role.MEMBER, ghostUsr,
+                            Instant.now().plus(1, ChronoUnit.HOURS)
+                    ));
+
+            // Savepoint rolled back the FK violation; outer txn still usable.
+            Invitation survivor = nested.createInvitation(
+                    orgId, "survivor@example.com", Role.MEMBER, alice,
+                    Instant.now().plus(1, ChronoUnit.HOURS)
+            );
+            survivorId = survivor.id();
+            conn.commit();
+        }
+        assertEquals("survivor@example.com", store.getInvitation(survivorId).identifier());
+    }
 }
