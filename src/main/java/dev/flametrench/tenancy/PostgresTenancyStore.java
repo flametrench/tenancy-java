@@ -235,6 +235,42 @@ public class PostgresTenancyStore {
         }
     }
 
+    /**
+     * Shield $fn with a savepoint when the store is caller-owned (inside an
+     * adopter's outer transaction); pass through to a fresh connection when
+     * standalone. Used by single-statement writes that don't need their own
+     * BEGIN/COMMIT but must not contaminate an outer transaction on a
+     * constraint violation. See ADR 0013.
+     */
+    private <T> T nested(TxFn<T> fn) {
+        if (!isCallerOwned()) {
+            try (Connection conn = acquireConnection()) {
+                return fn.apply(conn);
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        Connection conn = callerConnection;
+        try {
+            Savepoint sp = conn.setSavepoint(makeSavepointName());
+            try {
+                T result = fn.apply(conn);
+                conn.releaseSavepoint(sp);
+                return result;
+            } catch (SQLException | RuntimeException e) {
+                try {
+                    conn.rollback(sp);
+                    conn.releaseSavepoint(sp);
+                } catch (SQLException ignored) {
+                }
+                if (e instanceof SQLException) throw new RuntimeException(e);
+                throw (RuntimeException) e;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     // ─── Row mappers ───
 
     private static Organization rowToOrg(ResultSet rs) throws SQLException {
@@ -1051,25 +1087,24 @@ public class PostgresTenancyStore {
         }
         UUID invUuid = UUID.fromString(Id.decode(Id.generate("inv")).uuid());
         String preJson = preTuplesToJson(preTuples != null ? preTuples : List.of());
-        try (Connection conn = acquireConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO inv (id, org_id, identifier, role, status, pre_tuples, invited_by, created_at, expires_at)"
-                   + " VALUES (?, ?, ?, ?, 'pending', ?::jsonb, ?, ?, ?) RETURNING " + INV_COLS)) {
-            ps.setObject(1, invUuid);
-            ps.setObject(2, wireToUuid(orgId));
-            ps.setString(3, identifier);
-            ps.setString(4, role.getValue());
-            ps.setString(5, preJson);
-            ps.setObject(6, wireToUuid(invitedBy));
-            ps.setTimestamp(7, Timestamp.from(now));
-            ps.setTimestamp(8, Timestamp.from(expiresAt));
-            try (ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                return rowToInv(rs);
+        return nested(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO inv (id, org_id, identifier, role, status, pre_tuples, invited_by, created_at, expires_at)"
+                  + " VALUES (?, ?, ?, ?, 'pending', ?::jsonb, ?, ?, ?) RETURNING " + INV_COLS)) {
+                ps.setObject(1, invUuid);
+                ps.setObject(2, wireToUuid(orgId));
+                ps.setString(3, identifier);
+                ps.setString(4, role.getValue());
+                ps.setString(5, preJson);
+                ps.setObject(6, wireToUuid(invitedBy));
+                ps.setTimestamp(7, Timestamp.from(now));
+                ps.setTimestamp(8, Timestamp.from(expiresAt));
+                try (ResultSet rs = ps.executeQuery()) {
+                    rs.next();
+                    return rowToInv(rs);
+                }
             }
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
-        }
+        });
     }
 
     public Invitation createInvitation(
