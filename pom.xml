@@ -7,7 +7,7 @@
 
     <groupId>dev.flametrench</groupId>
     <artifactId>tenancy</artifactId>
-    <version>0.2.0</version>
+    <version>0.3.0</version>
     <packaging>jar</packaging>
 
     <name>flametrench-tenancy</name>
@@ -54,7 +54,7 @@
         <dependency>
             <groupId>dev.flametrench</groupId>
             <artifactId>ids</artifactId>
-            <version>0.2.0</version>
+            <version>0.3.0</version>
         </dependency>
 
         <!-- Used by both the in-memory store (test scope below) and
