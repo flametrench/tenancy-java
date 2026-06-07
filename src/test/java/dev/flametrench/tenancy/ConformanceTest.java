@@ -286,6 +286,22 @@ class ConformanceTest {
             case "reinstate_org" -> store.reinstateOrg((String) args.get("org_id"));
             case "revoke_org" -> store.revokeOrg((String) args.get("org_id"));
 
+            case "list_orgs" -> {
+                String cursor = (String) args.get("cursor");
+                int limit = args.containsKey("limit")
+                        ? ((Number) args.get("limit")).intValue() : 200;
+                String query = (String) args.get("query");
+                Status status = args.containsKey("status")
+                        ? Status.valueOf(((String) args.get("status")).toUpperCase()) : null;
+                Page<Organization> page = store.listOrgs(cursor, limit, query, status);
+                Map<String, Object> out = new LinkedHashMap<>();
+                Map<String, Object> pageSection = new LinkedHashMap<>();
+                pageSection.put("next_cursor", page.nextCursor());
+                out.put("page", pageSection);
+                out.put("data", page.data());
+                yield out;
+            }
+
             // Harness-only assertion pseudo-ops.
             case "assert_subject_relations" -> {
                 List<Tuple> tuples = store.listTuplesForSubject(
@@ -340,6 +356,10 @@ class ConformanceTest {
             }
 
             Object result = invokeOp(store, op, resolvedInput);
+
+            if (expected != null && expected.has("result") && "list_orgs".equals(op)) {
+                assertListOrgsResult(result, expected.get("result"), variables);
+            }
 
             JsonNode captures = step.get("captures");
             if (captures != null) {
@@ -399,5 +419,51 @@ class ConformanceTest {
     @TestFactory
     List<DynamicTest> orgNameSlug() throws IOException {
         return conformanceTests("tenancy/org-name-slug.json");
+    }
+
+    @TestFactory
+    List<DynamicTest> listOrgs() throws IOException {
+        return conformanceTests("tenancy/list-orgs.json");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void assertListOrgsResult(
+            Object result, JsonNode expected, Map<String, Object> variables) {
+        Map<String, Object> resultMap = (Map<String, Object>) result;
+        List<Organization> data = (List<Organization>) resultMap.get("data");
+        Map<String, Object> pageSection = (Map<String, Object>) resultMap.get("page");
+
+        if (expected.has("data_ids_in_order")) {
+            List<String> expectedIds = new ArrayList<>();
+            for (JsonNode n : expected.get("data_ids_in_order")) {
+                expectedIds.add((String) resolveVars(n.asText(), variables));
+            }
+            List<String> actualIds = new ArrayList<>();
+            for (Organization org : data) actualIds.add(org.id());
+            assertEquals(expectedIds, actualIds, "data_ids_in_order");
+        }
+        if (expected.has("data_ids_unordered")) {
+            List<String> expectedIds = new ArrayList<>();
+            for (JsonNode n : expected.get("data_ids_unordered")) {
+                expectedIds.add((String) resolveVars(n.asText(), variables));
+            }
+            List<String> actualIds = new ArrayList<>();
+            for (Organization org : data) actualIds.add(org.id());
+            assertEquals(
+                    new java.util.HashSet<>(expectedIds),
+                    new java.util.HashSet<>(actualIds),
+                    "data_ids_unordered");
+        }
+        if (expected.has("next_cursor")) {
+            Object nextCursor = pageSection.get("next_cursor");
+            if (expected.get("next_cursor").isNull()) {
+                assertNull(nextCursor, "next_cursor");
+            } else {
+                assertEquals(
+                        resolveVars(expected.get("next_cursor").asText(), variables),
+                        nextCursor,
+                        "next_cursor");
+            }
+        }
     }
 }
