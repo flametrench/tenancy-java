@@ -3,6 +3,19 @@
 All notable changes to `dev.flametrench:tenancy` are recorded here.
 Spec-level changes live in [`spec/CHANGELOG.md`](https://github.com/flametrench/spec/blob/main/CHANGELOG.md).
 
+## [v0.4.0] — 2026-06-07
+
+### Added
+- `InMemoryTenancyStore.listOrgs(cursor, limit, query, status)` — cursor-paginated cross-org enumeration per [ADR 0025](https://github.com/flametrench/spec/blob/main/decisions/0025-list-orgs.md). Returns `Page<Organization>` ordered by `id` ASC; supports optional `status` filter (`active`/`suspended`/`revoked`) and case-insensitive `query` substring over `name` or `slug`.
+- `PostgresTenancyStore.listOrgs(cursor, limit, query, status)` — Postgres-backed equivalent using `id > cursor` keyset pagination and `ILIKE` for the `query` filter.
+- Conformance fixture `tenancy/list-orgs.json` vendored (spec@da8ae1a, 8 tests). This is the 5th and final SDK implementation; the conformance fixture flips to `runnable_today: true` upon merge.
+
+## [v0.3.0] — 2026-06-06
+
+### Changed
+- Cohort version bump to `0.3.0` for consistency with `ids`, `identity`, and `authz` v0.3 family (no tenancy-specific behavior changes in this cohort cut).
+- CI: corrected `ids-java` checkout ref from stale `v0.1.0` tag → `v0.3.0`, matching the `ids` dependency declared in `pom.xml`. Fixes the "sibling resolves from Maven Central" principle-7 violation.
+
 ## [v0.2.0] — 2026-04-30
 
 ### Released
