@@ -706,6 +706,37 @@ public class PostgresTenancyStore {
         }
     }
 
+    /** ADR 0025: cursor-paginated cross-org enumeration. */
+    public Page<Organization> listOrgs(String cursor, int limit, String query, Status status) {
+        int cappedLimit = Math.max(1, Math.min(limit, 200));
+        StringBuilder sql = new StringBuilder("SELECT " + ORG_COLS + " FROM org WHERE 1=1");
+        if (status != null) sql.append(" AND status = ?");
+        if (query != null) sql.append(" AND (name ILIKE ? OR slug ILIKE ?)");
+        if (cursor != null) sql.append(" AND id > ?");
+        sql.append(" ORDER BY id LIMIT ?");
+        try (Connection conn = acquireConnection();
+             PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+            int idx = 1;
+            if (status != null) ps.setString(idx++, status.name().toLowerCase());
+            if (query != null) {
+                String pattern = "%" + query + "%";
+                ps.setString(idx++, pattern);
+                ps.setString(idx++, pattern);
+            }
+            if (cursor != null) ps.setObject(idx++, wireToUuid(cursor));
+            ps.setInt(idx, cappedLimit);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<Organization> rows = new ArrayList<>();
+                while (rs.next()) rows.add(rowToOrg(rs));
+                String nextCursor = (rows.size() == cappedLimit && !rows.isEmpty())
+                        ? rows.get(rows.size() - 1).id() : null;
+                return new Page<>(List.copyOf(rows), nextCursor);
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     private static class MemRowDirect {
         UUID id;
         UUID usrId;

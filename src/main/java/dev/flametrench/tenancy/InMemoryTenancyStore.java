@@ -129,6 +129,34 @@ public class InMemoryTenancyStore {
         return requireOrg(orgId);
     }
 
+    /** ADR 0025: cursor-paginated cross-org enumeration. */
+    public Page<Organization> listOrgs(String cursor, int limit, String query, Status status) {
+        int cappedLimit = Math.max(1, Math.min(limit, 200));
+        String needle = query != null ? query.toLowerCase(java.util.Locale.ROOT) : null;
+        List<Organization> matching = new ArrayList<>();
+        for (Organization org : orgs.values()) {
+            if (status != null && org.status() != status) continue;
+            if (needle != null) {
+                boolean hit = (org.name() != null
+                        && org.name().toLowerCase(java.util.Locale.ROOT).contains(needle))
+                        || (org.slug() != null
+                        && org.slug().toLowerCase(java.util.Locale.ROOT).contains(needle));
+                if (!hit) continue;
+            }
+            matching.add(org);
+        }
+        matching.sort(Comparator.comparing(Organization::id));
+        int start = 0;
+        if (cursor != null) {
+            while (start < matching.size() && matching.get(start).id().compareTo(cursor) <= 0) start++;
+        }
+        int end = Math.min(start + cappedLimit, matching.size());
+        List<Organization> page = matching.subList(start, end);
+        String nextCursor = (start + cappedLimit < matching.size() && !page.isEmpty())
+                ? page.get(page.size() - 1).id() : null;
+        return new Page<>(List.copyOf(page), nextCursor);
+    }
+
     /**
      * ADR 0011 partial update.
      *
