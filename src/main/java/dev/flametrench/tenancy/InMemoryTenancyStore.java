@@ -611,7 +611,7 @@ public class InMemoryTenancyStore {
         Membership admin = findActiveMembership(adminUsrId, inv.orgId());
         if (admin == null) {
             throw new ForbiddenError(
-                    "User " + adminUsrId + " has no active membership in " + inv.orgId()
+                    "User " + adminUsrId + " has no active membership in the invitation's org"
             );
         }
         if (admin.role() != Role.OWNER && admin.role() != Role.ADMIN) {

@@ -1322,7 +1322,8 @@ public class PostgresTenancyStore {
                 // authorization on the invitation's own org, enforced here
                 // as in adminRemove.
                 try (PreparedStatement mem = conn.prepareStatement(
-                        "SELECT role FROM mem WHERE usr_id = ? AND org_id = ? AND status = 'active'")) {
+                        "SELECT role FROM mem WHERE usr_id = ? AND org_id = ? AND status = 'active'"
+                      + " FOR SHARE")) {
                     mem.setObject(1, wireToUuid(adminUsrId));
                     mem.setObject(2, orgUuid);
                     try (ResultSet rs = mem.executeQuery()) {
