@@ -426,6 +426,11 @@ class ConformanceTest {
         return conformanceTests("tenancy/list-orgs.json");
     }
 
+    @TestFactory
+    List<DynamicTest> revokeInvitationAuthz() throws IOException {
+        return conformanceTests("tenancy/revoke-invitation-authz.json");
+    }
+
     @SuppressWarnings("unchecked")
     private static void assertListOrgsResult(
             Object result, JsonNode expected, Map<String, Object> variables) {

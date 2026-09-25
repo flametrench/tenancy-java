@@ -606,6 +606,19 @@ public class InMemoryTenancyStore {
 
     public Invitation revokeInvitation(String invId, String adminUsrId) {
         Invitation inv = getInvitation(invId);
+        // docs/tenancy.md: revokeInvitation is subject to admin authorization
+        // on the invitation's own org, enforced here as in adminRemove.
+        Membership admin = findActiveMembership(adminUsrId, inv.orgId());
+        if (admin == null) {
+            throw new ForbiddenError(
+                    "User " + adminUsrId + " has no active membership in " + inv.orgId()
+            );
+        }
+        if (admin.role() != Role.OWNER && admin.role() != Role.ADMIN) {
+            throw new ForbiddenError(
+                    "Role " + admin.role().getValue() + " is not permitted to revoke invitations"
+            );
+        }
         if (inv.status() != InvitationStatus.PENDING) {
             throw new InvitationNotPendingError(
                     "Invitation " + invId + " is " + inv.status().getValue() + ", not pending"
