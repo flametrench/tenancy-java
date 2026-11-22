@@ -1359,6 +1359,48 @@ public class PostgresTenancyStore {
         });
     }
 
+    /**
+     * Revoke a pending invitation as the system: no actor and no
+     * authorization check. The invitation becomes revoked with
+     * {@code terminalBy} null (ADR 0028).
+     *
+     * <p><b>Call-site gate (ADR 0028 rule 7):</b> call this only from
+     * server-side system or automation code, such as clean-up jobs or
+     * cascades from your own workflows. It must not be reachable from any
+     * user-facing or tenant-scoped route. The SDK cannot enforce this and
+     * conformance cannot detect a missing gate; the route layer is the only
+     * control. This is the same pattern as {@code listOrgs}. For a revoke
+     * performed by a person, use {@link #revokeInvitation(String, String)}.
+     *
+     * @throws NotFoundError if the invitation does not exist
+     * @throws InvitationNotPendingError if the invitation is not pending
+     */
+    public Invitation revokeInvitationAsSystem(String invId) {
+        return tx(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT status FROM inv WHERE id = ? FOR UPDATE")) {
+                ps.setObject(1, wireToUuid(invId));
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) throw new NotFoundError("Invitation " + invId + " not found");
+                    String status = rs.getString("status");
+                    if (!"pending".equals(status)) {
+                        throw new InvitationNotPendingError("Invitation " + invId + " is " + status);
+                    }
+                }
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE inv SET status = 'revoked', terminal_at = ?, terminal_by = NULL"
+                  + " WHERE id = ? RETURNING " + INV_COLS)) {
+                ps.setTimestamp(1, Timestamp.from(now()));
+                ps.setObject(2, wireToUuid(invId));
+                try (ResultSet rs = ps.executeQuery()) {
+                    rs.next();
+                    return rowToInv(rs);
+                }
+            }
+        });
+    }
+
     // ─── Tuple accessors ───
 
     public List<Tuple> listTuplesForSubject(String subjectType, String subjectId) {

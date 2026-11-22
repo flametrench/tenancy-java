@@ -160,9 +160,11 @@ class ConformanceTest {
                         "Cannot resolve path segment '" + segment + "' in map");
             } else if (current != null) {
                 // Try record accessor methods (Java records expose fields as methods).
+                // A null-valued field (e.g. terminal_by on a system revoke) is
+                // a valid capture; only a missing accessor is an error.
                 Object val = invokeAccessor(current, segment);
-                if (val == null) val = invokeAccessor(current, camel);
-                if (val == null) {
+                if (val == NO_ACCESSOR) val = invokeAccessor(current, camel);
+                if (val == NO_ACCESSOR) {
                     throw new IllegalStateException(
                             "Cannot resolve path segment '" + segment + "' on "
                                     + current.getClass().getSimpleName());
@@ -175,11 +177,13 @@ class ConformanceTest {
         return current;
     }
 
+    private static final Object NO_ACCESSOR = new Object();
+
     private static Object invokeAccessor(Object target, String fieldName) {
         try {
             return target.getClass().getMethod(fieldName).invoke(target);
         } catch (NoSuchMethodException e) {
-            return null;
+            return NO_ACCESSOR;
         } catch (ReflectiveOperationException e) {
             throw new RuntimeException(e);
         }
@@ -282,6 +286,7 @@ class ConformanceTest {
                     (String) args.get("inv_id"),
                     (String) args.get("admin_usr_id")
             );
+            case "revoke_invitation_as_system" -> store.revokeInvitationAsSystem((String) args.get("inv_id"));
             case "suspend_org" -> store.suspendOrg((String) args.get("org_id"));
             case "reinstate_org" -> store.reinstateOrg((String) args.get("org_id"));
             case "revoke_org" -> store.revokeOrg((String) args.get("org_id"));
@@ -429,6 +434,11 @@ class ConformanceTest {
     @TestFactory
     List<DynamicTest> revokeInvitationAuthz() throws IOException {
         return conformanceTests("tenancy/revoke-invitation-authz.json");
+    }
+
+    @TestFactory
+    List<DynamicTest> revokeInvitationAsSystem() throws IOException {
+        return conformanceTests("tenancy/revoke-invitation-as-system.json");
     }
 
     @SuppressWarnings("unchecked")

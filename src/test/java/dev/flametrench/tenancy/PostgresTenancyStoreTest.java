@@ -514,4 +514,28 @@ class PostgresTenancyStoreTest {
         assertEquals(carol, revoked.terminalBy());
         assertEquals(InvitationStatus.REVOKED, store.getInvitation(inv.id()).status());
     }
+
+    // ─── revokeInvitationAsSystem (ADR 0028 rules 6-10) ───
+
+    @Test
+    void revokeInvitationAsSystem_pending_revokedWithNoActor() {
+        String orgId = store.createOrg(alice).org().id();
+        Invitation inv = pendingInvitation(orgId);
+        Invitation revoked = store.revokeInvitationAsSystem(inv.id());
+        assertEquals(InvitationStatus.REVOKED, revoked.status());
+        assertNull(revoked.terminalBy());
+        assertNotNull(revoked.terminalAt());
+        Invitation stored = store.getInvitation(inv.id());
+        assertEquals(InvitationStatus.REVOKED, stored.status());
+        assertNull(stored.terminalBy());
+    }
+
+    @Test
+    void revokeInvitationAsSystem_notPending_refused_invitationUnchanged() {
+        String orgId = store.createOrg(alice).org().id();
+        Invitation inv = pendingInvitation(orgId);
+        Invitation first = store.revokeInvitation(inv.id(), alice);
+        assertThrows(InvitationNotPendingError.class, () -> store.revokeInvitationAsSystem(inv.id()));
+        assertEquals(first, store.getInvitation(inv.id()));
+    }
 }

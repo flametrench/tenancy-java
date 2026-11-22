@@ -631,6 +631,34 @@ public class InMemoryTenancyStore {
         return updated;
     }
 
+    /**
+     * Revoke a pending invitation as the system: no actor and no
+     * authorization check. The invitation becomes revoked with
+     * {@code terminalBy} null (ADR 0028).
+     *
+     * <p><b>Call-site gate (ADR 0028 rule 7):</b> call this only from
+     * server-side system or automation code, such as clean-up jobs or
+     * cascades from your own workflows. It must not be reachable from any
+     * user-facing or tenant-scoped route. The SDK cannot enforce this and
+     * conformance cannot detect a missing gate; the route layer is the only
+     * control. This is the same pattern as {@code listOrgs}. For a revoke
+     * performed by a person, use {@link #revokeInvitation(String, String)}.
+     *
+     * @throws NotFoundError if the invitation does not exist
+     * @throws InvitationNotPendingError if the invitation is not pending
+     */
+    public Invitation revokeInvitationAsSystem(String invId) {
+        Invitation inv = getInvitation(invId);
+        if (inv.status() != InvitationStatus.PENDING) {
+            throw new InvitationNotPendingError(
+                    "Invitation " + invId + " is " + inv.status().getValue() + ", not pending"
+            );
+        }
+        Invitation updated = inv.transitionTerminal(InvitationStatus.REVOKED, now(), null, null);
+        invitations.put(inv.id(), updated);
+        return updated;
+    }
+
     // ─── Tuple accessors ───
 
     public List<Tuple> listTuplesForSubject(String subjectType, String subjectId) {
