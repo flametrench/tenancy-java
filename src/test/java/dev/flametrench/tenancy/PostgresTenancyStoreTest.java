@@ -453,4 +453,65 @@ class PostgresTenancyStoreTest {
         }
         assertEquals("survivor@example.com", store.getInvitation(survivorId).identifier());
     }
+
+    // ─── revokeInvitation authorization (docs/tenancy.md §Invitations) ───
+
+    private Invitation pendingInvitation(String orgId) {
+        return store.createInvitation(orgId, "invitee@example.com", Role.MEMBER, alice, Instant.now().plus(1, ChronoUnit.HOURS));
+    }
+
+    /** A refused revoke changes nothing: still pending, no terminal fields. */
+    private void assertStillPending(String invId) {
+        Invitation after = store.getInvitation(invId);
+        assertEquals(InvitationStatus.PENDING, after.status());
+        assertNull(after.terminalAt());
+        assertNull(after.terminalBy());
+    }
+
+    @Test
+    void revokeInvitation_plainMember_forbidden_invitationUnchanged() {
+        String orgId = store.createOrg(alice).org().id();
+        store.addMember(orgId, bob, Role.MEMBER);
+        Invitation inv = pendingInvitation(orgId);
+        assertThrows(ForbiddenError.class, () -> store.revokeInvitation(inv.id(), bob));
+        assertStillPending(inv.id());
+    }
+
+    @Test
+    void revokeInvitation_nonMember_forbidden_invitationUnchanged() {
+        String orgId = store.createOrg(alice).org().id();
+        Invitation inv = pendingInvitation(orgId);
+        assertThrows(ForbiddenError.class, () -> store.revokeInvitation(inv.id(), carol));
+        assertStillPending(inv.id());
+    }
+
+    @Test
+    void revokeInvitation_ownerOfAnotherOrg_forbidden_invitationUnchanged() {
+        String orgId = store.createOrg(alice).org().id();
+        store.createOrg(carol);
+        Invitation inv = pendingInvitation(orgId);
+        assertThrows(ForbiddenError.class, () -> store.revokeInvitation(inv.id(), carol));
+        assertStillPending(inv.id());
+    }
+
+    @Test
+    void revokeInvitation_suspendedAdmin_forbidden_invitationUnchanged() {
+        String orgId = store.createOrg(alice).org().id();
+        Membership carolMem = store.addMember(orgId, carol, Role.ADMIN);
+        store.suspendMembership(carolMem.id());
+        Invitation inv = pendingInvitation(orgId);
+        assertThrows(ForbiddenError.class, () -> store.revokeInvitation(inv.id(), carol));
+        assertStillPending(inv.id());
+    }
+
+    @Test
+    void revokeInvitation_admin_succeeds_withTerminalBy() {
+        String orgId = store.createOrg(alice).org().id();
+        store.addMember(orgId, carol, Role.ADMIN);
+        Invitation inv = pendingInvitation(orgId);
+        Invitation revoked = store.revokeInvitation(inv.id(), carol);
+        assertEquals(InvitationStatus.REVOKED, revoked.status());
+        assertEquals(carol, revoked.terminalBy());
+        assertEquals(InvitationStatus.REVOKED, store.getInvitation(inv.id()).status());
+    }
 }

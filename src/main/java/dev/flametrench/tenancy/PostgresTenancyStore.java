@@ -1309,15 +1309,39 @@ public class PostgresTenancyStore {
     public Invitation revokeInvitation(String invId, String adminUsrId) {
         return tx(conn -> {
             try (PreparedStatement ps = conn.prepareStatement(
-                    "SELECT id, status FROM inv WHERE id = ? FOR UPDATE")) {
+                    "SELECT id, status, org_id FROM inv WHERE id = ? FOR UPDATE")) {
                 ps.setObject(1, wireToUuid(invId));
+                String status;
+                UUID orgUuid;
                 try (ResultSet rs = ps.executeQuery()) {
                     if (!rs.next()) throw new NotFoundError("Invitation " + invId + " not found");
-                    if (!"pending".equals(rs.getString("status"))) {
-                        throw new InvitationNotPendingError(
-                                "Invitation " + invId + " is " + rs.getString("status")
-                        );
+                    status = rs.getString("status");
+                    orgUuid = (UUID) rs.getObject("org_id");
+                }
+                // docs/tenancy.md: revokeInvitation is subject to admin
+                // authorization on the invitation's own org, enforced here
+                // as in adminRemove.
+                try (PreparedStatement mem = conn.prepareStatement(
+                        "SELECT role FROM mem WHERE usr_id = ? AND org_id = ? AND status = 'active'"
+                      + " FOR SHARE")) {
+                    mem.setObject(1, wireToUuid(adminUsrId));
+                    mem.setObject(2, orgUuid);
+                    try (ResultSet rs = mem.executeQuery()) {
+                        if (!rs.next()) {
+                            throw new ForbiddenError(
+                                    "User " + adminUsrId + " has no active membership in the invitation's org"
+                            );
+                        }
+                        String role = rs.getString("role");
+                        if (!"owner".equals(role) && !"admin".equals(role)) {
+                            throw new ForbiddenError(
+                                    "Role " + role + " is not permitted to revoke invitations"
+                            );
+                        }
                     }
+                }
+                if (!"pending".equals(status)) {
+                    throw new InvitationNotPendingError("Invitation " + invId + " is " + status);
                 }
             }
             Timestamp ts = Timestamp.from(now());
